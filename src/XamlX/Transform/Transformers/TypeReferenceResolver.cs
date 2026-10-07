@@ -38,7 +38,8 @@ namespace XamlX.Transform.Transformers
                 return ResolveTypeCore(context, xmlns, name, isMarkupExtension, typeArguments, lineInfo);
         }
 
-        [UnconditionalSuppressMessage("Trimming", "IL2062", Justification = "A compilation error will be reported if the type is not found.")]
+        [UnconditionalSuppressMessage("Trimming", "IL2062", Justification = TrimmingMessages.TypePreservedElsewhere)]
+        [UnconditionalSuppressMessage("Trimming", "IL2072", Justification = TrimmingMessages.TypePreservedElsewhere)]
         static XamlAstClrTypeReference ResolveTypeCore(AstTransformationContext context,
             string? xmlns, string name, bool isMarkupExtension, List<XamlAstXmlTypeReference>? typeArguments, IXamlLineInfo lineInfo)
         {
@@ -97,11 +98,23 @@ namespace XamlX.Transform.Transformers
                     }, name);
             }
 
-            if (typeArguments.Count != 0)
-                found = found?.MakeGenericType(targs);
             if (found != null)
+            {
+                if (targs.Count != 0)
+                {
+                    // Nullable<T> only accepts non-nullable value types.
+                    if (found.Equals(context.Configuration.WellKnownTypes.NullableT) && 
+                            targs[0] is {} targ && (!targ.IsValueType || targ.IsNullable()))
+                        throw new XamlTransformException(
+                            $"Unable to construct generic type {found.GetFullName()} with arguments {string.Join(", ", targs.Select(a => a.GetFullName()))}: type argument {targs[0].GetFullName()} must be a non-nullable value type",
+                            lineInfo);
+
+                    found = found.MakeGenericType(targs);
+                }
+
                 return new XamlAstClrTypeReference(lineInfo, found,
                     isMarkupExtension || found.Name.EndsWith("Extension"));
+            }
 
             throw new XamlTransformException($"Unable to resolve type {name} from namespace {xmlns}", lineInfo);
         }
